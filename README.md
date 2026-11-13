@@ -1,1 +1,1 @@
-# palimpsest-controller-dev
+# Palimpsest Controller
