@@ -1,0 +1,7 @@
+[project]
+name = "palimpsest-controller-dev"
+version = "0.1.0"
+description = "Palimpsest controller development"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = []
