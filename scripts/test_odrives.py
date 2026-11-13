@@ -5,13 +5,13 @@
 # ///
 """Quick test harness for ODrives on a SocketCAN bus (CANSimple protocol).
 
-    uv run odrive_can_test.py scan                 # list nodes, state, errors, vbus (no motion)
-    uv run odrive_can_test.py vel  --node 0 --vel 1.0 --duration 3
-    uv run odrive_can_test.py vel  --node 0 1 --vel 0.5           # both at same speed
-    uv run odrive_can_test.py vel  --node all --vel 0.5 -0.5      # one speed per node
-    uv run odrive_can_test.py pos  --node 0 1 --delta 0.25
-    uv run odrive_can_test.py idle                 # put every node into IDLE
-    uv run odrive_can_test.py clear                # clear errors on every node
+    uv run scripts/test_odrives.py scan                 # list nodes, state, errors, vbus (no motion)
+    uv run scripts/test_odrives.py vel  --node 0 --vel 1.0 --duration 3
+    uv run scripts/test_odrives.py vel  --node 0 1 --vel 0.5           # both at same speed
+    uv run scripts/test_odrives.py vel  --node all --vel 0.5 -0.5      # one speed per node
+    uv run scripts/test_odrives.py pos  --node 0 1 --delta 0.25
+    uv run scripts/test_odrives.py idle                 # put every node into IDLE
+    uv run scripts/test_odrives.py clear                # clear errors on every node
 
 Velocities are in turns/s, positions in turns. Any motion command puts the
 axis back into IDLE on exit, including Ctrl-C and errors.
@@ -41,28 +41,50 @@ GET_BUS_VOLTAGE_CURRENT = 0x15
 GET_TEMPERATURE = 0x17
 CLEAR_ERRORS = 0x18
 
-AXIS_STATE = {0: "UNDEFINED", 1: "IDLE", 2: "STARTUP_SEQUENCE", 3: "FULL_CALIBRATION",
-              4: "MOTOR_CALIBRATION", 6: "ENCODER_INDEX_SEARCH",
-              7: "ENCODER_OFFSET_CALIBRATION", 8: "CLOSED_LOOP_CONTROL",
-              9: "LOCKIN_SPIN", 10: "ENCODER_DIR_FIND", 11: "HOMING",
-              12: "ENCODER_HALL_POLARITY_CAL", 13: "ENCODER_HALL_PHASE_CAL",
-              14: "ANTICOGGING_CAL"}
+AXIS_STATE = {
+    0: "UNDEFINED",
+    1: "IDLE",
+    2: "STARTUP_SEQUENCE",
+    3: "FULL_CALIBRATION",
+    4: "MOTOR_CALIBRATION",
+    6: "ENCODER_INDEX_SEARCH",
+    7: "ENCODER_OFFSET_CALIBRATION",
+    8: "CLOSED_LOOP_CONTROL",
+    9: "LOCKIN_SPIN",
+    10: "ENCODER_DIR_FIND",
+    11: "HOMING",
+    12: "ENCODER_HALL_POLARITY_CAL",
+    13: "ENCODER_HALL_PHASE_CAL",
+    14: "ANTICOGGING_CAL",
+}
 IDLE, CLOSED_LOOP = 1, 8
 CONTROL_VELOCITY, CONTROL_POSITION = 2, 3
 INPUT_VEL_RAMP, INPUT_TRAP_TRAJ = 2, 5
 
 # ODrive Pro/S1 (firmware 0.6.x) ODriveError bits
 ODRIVE_ERRORS = {
-    0x1: "INITIALIZING", 0x2: "SYSTEM_LEVEL", 0x4: "TIMING_ERROR",
-    0x8: "MISSING_ESTIMATE", 0x10: "BAD_CONFIG", 0x20: "DRV_FAULT",
-    0x40: "MISSING_INPUT", 0x100: "DC_BUS_OVER_VOLTAGE",
-    0x200: "DC_BUS_UNDER_VOLTAGE", 0x400: "DC_BUS_OVER_CURRENT",
-    0x800: "DC_BUS_OVER_REGEN_CURRENT", 0x1000: "CURRENT_LIMIT_VIOLATION",
-    0x2000: "MOTOR_OVER_TEMP", 0x4000: "INVERTER_OVER_TEMP",
-    0x8000: "VELOCITY_LIMIT_VIOLATION", 0x10000: "POSITION_LIMIT_VIOLATION",
-    0x1000000: "WATCHDOG_TIMER_EXPIRED", 0x2000000: "ESTOP_REQUESTED",
-    0x4000000: "SPINOUT_DETECTED", 0x8000000: "BRAKE_RESISTOR_DISARMED",
-    0x10000000: "THERMISTOR_DISCONNECTED", 0x40000000: "CALIBRATION_ERROR",
+    0x1: "INITIALIZING",
+    0x2: "SYSTEM_LEVEL",
+    0x4: "TIMING_ERROR",
+    0x8: "MISSING_ESTIMATE",
+    0x10: "BAD_CONFIG",
+    0x20: "DRV_FAULT",
+    0x40: "MISSING_INPUT",
+    0x100: "DC_BUS_OVER_VOLTAGE",
+    0x200: "DC_BUS_UNDER_VOLTAGE",
+    0x400: "DC_BUS_OVER_CURRENT",
+    0x800: "DC_BUS_OVER_REGEN_CURRENT",
+    0x1000: "CURRENT_LIMIT_VIOLATION",
+    0x2000: "MOTOR_OVER_TEMP",
+    0x4000: "INVERTER_OVER_TEMP",
+    0x8000: "VELOCITY_LIMIT_VIOLATION",
+    0x10000: "POSITION_LIMIT_VIOLATION",
+    0x1000000: "WATCHDOG_TIMER_EXPIRED",
+    0x2000000: "ESTOP_REQUESTED",
+    0x4000000: "SPINOUT_DETECTED",
+    0x8000000: "BRAKE_RESISTOR_DISARMED",
+    0x10000000: "THERMISTOR_DISCONNECTED",
+    0x40000000: "CALIBRATION_ERROR",
 }
 
 CAN_FRAME = struct.Struct("<IB3x8s")
@@ -97,11 +119,14 @@ class NodeStatus:
     def summary(self) -> str:
         def f(v, fmt):
             return "?" if v is None else format(v, fmt)
-        return (f"node {self.node_id}: state={AXIS_STATE.get(self.axis_state, self.axis_state)} "
-                f"errors={decode_errors(self.axis_error)} proc_result={self.procedure_result} "
-                f"pos={f(self.pos, '+.3f')}t vel={f(self.vel, '+.3f')}t/s "
-                f"vbus={f(self.vbus, '.2f')}V ibus={f(self.ibus, '+.2f')}A "
-                f"fet={f(self.fet_temp, '.1f')}C motor={f(self.motor_temp, '.1f')}C")
+
+        return (
+            f"node {self.node_id}: state={AXIS_STATE.get(self.axis_state, self.axis_state)} "
+            f"errors={decode_errors(self.axis_error)} proc_result={self.procedure_result} "
+            f"pos={f(self.pos, '+.3f')}t vel={f(self.vel, '+.3f')}t/s "
+            f"vbus={f(self.vbus, '.2f')}V ibus={f(self.ibus, '+.2f')}A "
+            f"fet={f(self.fet_temp, '.1f')}C motor={f(self.motor_temp, '.1f')}C"
+        )
 
 
 class ODriveBus:
@@ -138,7 +163,9 @@ class ODriveBus:
     def _handle(self, node: int, cmd: int, d: bytes) -> None:
         st = self.nodes.setdefault(node, NodeStatus(node))
         if cmd == HEARTBEAT and len(d) >= 7:
-            st.axis_error, st.axis_state, st.procedure_result, traj = struct.unpack_from("<IBBB", d)
+            st.axis_error, st.axis_state, st.procedure_result, traj = (
+                struct.unpack_from("<IBBB", d)
+            )
             st.trajectory_done = bool(traj & 1)
             st.last_heartbeat = time.monotonic()
         elif cmd == GET_ENCODER_ESTIMATES and len(d) == 8:
@@ -152,8 +179,12 @@ class ODriveBus:
     def set_axis_state(self, node: int, state: int) -> None:
         self.send(node, SET_AXIS_STATE, struct.pack("<I", state))
 
-    def set_controller_mode(self, node: int, control_mode: int, input_mode: int) -> None:
-        self.send(node, SET_CONTROLLER_MODE, struct.pack("<II", control_mode, input_mode))
+    def set_controller_mode(
+        self, node: int, control_mode: int, input_mode: int
+    ) -> None:
+        self.send(
+            node, SET_CONTROLLER_MODE, struct.pack("<II", control_mode, input_mode)
+        )
 
     def set_input_vel(self, node: int, vel: float, torque_ff: float = 0.0) -> None:
         self.send(node, SET_INPUT_VEL, struct.pack("<ff", vel, torque_ff))
@@ -186,11 +217,14 @@ class ODriveBus:
         self.poll(0.3)
         st = self.nodes.get(node)
         if st is None or not st.last_heartbeat:
-            sys.exit(f"node {node} not found on bus (seen: {sorted(self.nodes) or 'none'})")
+            sys.exit(
+                f"node {node} not found on bus (seen: {sorted(self.nodes) or 'none'})"
+            )
         return st
 
 
 # --- subcommands -------------------------------------------------------------
+
 
 def resolve_nodes(bus: ODriveBus, spec: list[str] | None) -> list[int]:
     """Turn `--node 0 1` / `--node all` into a list of node ids present on the bus."""
@@ -212,7 +246,9 @@ def per_node(values: list[float], nodes: list[int], name: str) -> dict[int, floa
     if len(values) == 1:
         return {n: values[0] for n in nodes}
     if len(values) != len(nodes):
-        sys.exit(f"--{name} needs 1 value or {len(nodes)} (one per node), got {len(values)}")
+        sys.exit(
+            f"--{name} needs 1 value or {len(nodes)} (one per node), got {len(values)}"
+        )
     return dict(zip(nodes, values))
 
 
@@ -230,12 +266,15 @@ def cmd_scan(bus: ODriveBus, args) -> None:
         print(st.summary())
 
 
-def _enter_closed_loop(bus: ODriveBus, args, nodes: list[int],
-                       control_mode: int, input_mode: int) -> None:
+def _enter_closed_loop(
+    bus: ODriveBus, args, nodes: list[int], control_mode: int, input_mode: int
+) -> None:
     errored = {n: bus.nodes[n].axis_error for n in nodes if bus.nodes[n].axis_error}
     if errored:
-        sys.exit("active errors, run `clear` first: " +
-                 ", ".join(f"node {n}: {decode_errors(e)}" for n, e in errored.items()))
+        sys.exit(
+            "active errors, run `clear` first: "
+            + ", ".join(f"node {n}: {decode_errors(e)}" for n, e in errored.items())
+        )
     for n in nodes:
         bus.set_controller_mode(n, control_mode, input_mode)
         if args.vel_limit is not None:
@@ -244,15 +283,18 @@ def _enter_closed_loop(bus: ODriveBus, args, nodes: list[int],
     for n in nodes:
         if not bus.wait_for_state(n, CLOSED_LOOP):
             st = bus.nodes[n]
-            raise RuntimeError(f"node {n} failed to enter CLOSED_LOOP_CONTROL: "
-                               f"state={AXIS_STATE.get(st.axis_state)} "
-                               f"errors={decode_errors(st.axis_error)} "
-                               f"proc_result={st.procedure_result}")
+            raise RuntimeError(
+                f"node {n} failed to enter CLOSED_LOOP_CONTROL: "
+                f"state={AXIS_STATE.get(st.axis_state)} "
+                f"errors={decode_errors(st.axis_error)} "
+                f"proc_result={st.procedure_result}"
+            )
     print(f"node(s) {nodes} in CLOSED_LOOP_CONTROL")
 
 
-def _monitor(bus: ODriveBus, nodes: list[int], duration: float,
-             done=lambda st: False) -> None:
+def _monitor(
+    bus: ODriveBus, nodes: list[int], duration: float, done=lambda st: False
+) -> None:
     """Watch all nodes; abort if any drops out. Returns early once all are `done`."""
     end = time.monotonic() + duration
     next_print = 0.0
@@ -261,11 +303,18 @@ def _monitor(bus: ODriveBus, nodes: list[int], duration: float,
         for n in nodes:
             st = bus.nodes[n]
             if st.axis_error or st.axis_state != CLOSED_LOOP:
-                raise RuntimeError(f"node {n} dropped out: state={AXIS_STATE.get(st.axis_state)} "
-                                   f"errors={decode_errors(st.axis_error)}")
+                raise RuntimeError(
+                    f"node {n} dropped out: state={AXIS_STATE.get(st.axis_state)} "
+                    f"errors={decode_errors(st.axis_error)}"
+                )
         if time.monotonic() >= next_print:
-            print("  " + "   ".join(f"[{n}] pos={bus.nodes[n].pos:+.3f}t vel={bus.nodes[n].vel:+.3f}t/s"
-                                    for n in nodes))
+            print(
+                "  "
+                + "   ".join(
+                    f"[{n}] pos={bus.nodes[n].pos:+.3f}t vel={bus.nodes[n].vel:+.3f}t/s"
+                    for n in nodes
+                )
+            )
             next_print = time.monotonic() + 0.25
         if all(done(bus.nodes[n]) for n in nodes):
             return
@@ -274,15 +323,20 @@ def _monitor(bus: ODriveBus, nodes: list[int], duration: float,
 def cmd_vel(bus: ODriveBus, args) -> None:
     vels = per_node(args.vel, args.nodes, "vel")
     _enter_closed_loop(bus, args, args.nodes, CONTROL_VELOCITY, INPUT_VEL_RAMP)
-    print("spinning " + ", ".join(f"node {n} @ {v:+.2f} t/s" for n, v in vels.items())
-          + f" for {args.duration:.1f}s")
+    print(
+        "spinning "
+        + ", ".join(f"node {n} @ {v:+.2f} t/s" for n, v in vels.items())
+        + f" for {args.duration:.1f}s"
+    )
     for n, v in vels.items():
         bus.set_input_vel(n, v)
     _monitor(bus, args.nodes, args.duration)
     print("ramping down")
     for n in args.nodes:
         bus.set_input_vel(n, 0.0)
-    _monitor(bus, args.nodes, 3.0, done=lambda st: st.vel is not None and abs(st.vel) < 0.05)
+    _monitor(
+        bus, args.nodes, 3.0, done=lambda st: st.vel is not None and abs(st.vel) < 0.05
+    )
 
 
 def cmd_pos(bus: ODriveBus, args) -> None:
@@ -293,13 +347,21 @@ def cmd_pos(bus: ODriveBus, args) -> None:
     start = {n: bus.nodes[n].pos for n in args.nodes}
     _enter_closed_loop(bus, args, args.nodes, CONTROL_POSITION, INPUT_TRAP_TRAJ)
     for leg in ("out", "back"):
-        targets = {n: start[n] + (deltas[n] if leg == "out" else 0.0) for n in args.nodes}
-        print("moving " + ", ".join(f"node {n} -> {t:+.3f}t" for n, t in targets.items()))
+        targets = {
+            n: start[n] + (deltas[n] if leg == "out" else 0.0) for n in args.nodes
+        }
+        print(
+            "moving " + ", ".join(f"node {n} -> {t:+.3f}t" for n, t in targets.items())
+        )
         for n, t in targets.items():
             bus.set_input_pos(n, t)
         bus.poll(0.1)  # let trajectory_done clear
-        _monitor(bus, args.nodes, args.timeout,
-                 done=lambda s: s.trajectory_done and abs(s.pos - targets[s.node_id]) < 0.02)
+        _monitor(
+            bus,
+            args.nodes,
+            args.timeout,
+            done=lambda s: s.trajectory_done and abs(s.pos - targets[s.node_id]) < 0.02,
+        )
         bus.poll(args.dwell)
 
 
@@ -318,30 +380,55 @@ def cmd_clear(bus: ODriveBus, args) -> None:
 
 
 def main() -> None:
-    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     p.add_argument("--iface", default="can0")
-    p.add_argument("--vel-limit", type=float, default=None,
-                   help="optionally send Set_Limits (turns/s) before moving")
-    p.add_argument("--current-limit", type=float, default=10.0,
-                   help="current limit (A) used with --vel-limit")
+    p.add_argument(
+        "--vel-limit",
+        type=float,
+        default=None,
+        help="optionally send Set_Limits (turns/s) before moving",
+    )
+    p.add_argument(
+        "--current-limit",
+        type=float,
+        default=10.0,
+        help="current limit (A) used with --vel-limit",
+    )
     sub = p.add_subparsers(dest="cmd", required=True)
 
     def add_node_arg(sp, default):
-        sp.add_argument("--node", nargs="+", default=default, metavar="ID",
-                        help="node id(s), or 'all' (default: %(default)s)")
+        sp.add_argument(
+            "--node",
+            nargs="+",
+            default=default,
+            metavar="ID",
+            help="node id(s), or 'all' (default: %(default)s)",
+        )
 
     sub.add_parser("scan")
 
     v = sub.add_parser("vel")
     add_node_arg(v, ["0"])
-    v.add_argument("--vel", type=float, nargs="+", default=[0.5],
-                   help="turns/s; one value for all nodes or one per node")
+    v.add_argument(
+        "--vel",
+        type=float,
+        nargs="+",
+        default=[0.5],
+        help="turns/s; one value for all nodes or one per node",
+    )
     v.add_argument("--duration", type=float, default=3.0)
 
     ps = sub.add_parser("pos")
     add_node_arg(ps, ["0"])
-    ps.add_argument("--delta", type=float, nargs="+", default=[0.25],
-                    help="relative move in turns (then returns); one value or one per node")
+    ps.add_argument(
+        "--delta",
+        type=float,
+        nargs="+",
+        default=[0.25],
+        help="relative move in turns (then returns); one value or one per node",
+    )
     ps.add_argument("--timeout", type=float, default=5.0)
     ps.add_argument("--dwell", type=float, default=0.5)
 
@@ -350,8 +437,13 @@ def main() -> None:
 
     args = p.parse_args()
     bus = ODriveBus(args.iface)
-    handler = {"scan": cmd_scan, "vel": cmd_vel, "pos": cmd_pos,
-               "idle": cmd_idle, "clear": cmd_clear}[args.cmd]
+    handler = {
+        "scan": cmd_scan,
+        "vel": cmd_vel,
+        "pos": cmd_pos,
+        "idle": cmd_idle,
+        "clear": cmd_clear,
+    }[args.cmd]
     if args.cmd != "scan":
         args.nodes = resolve_nodes(bus, args.node)
     if args.cmd == "vel":  # validate before anything moves
